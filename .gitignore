@@ -1,0 +1,27 @@
+# === 登录凭证 (敏感) ===
+cookies.pkl
+
+# === 个人配置 ===
+targets.json
+
+# === 自动生成的临时文件 ===
+qrcode.png
+portal_page.html
+课表.md
+
+# === Python 缓存 ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === 系统文件 ===
+Thumbs.db
+Desktop.ini

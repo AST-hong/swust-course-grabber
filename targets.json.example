@@ -1,0 +1,29 @@
+[
+  {
+    "keyword": "机器学习",
+    "teacher": "",
+    "priority": 1,
+    "time": "周二第三讲",
+    "weeks": "01-16",
+    "place": "",
+    "categories": ["计划课程"]
+  },
+  {
+    "keyword": "羽毛球",
+    "teacher": "张老师",
+    "priority": 2,
+    "time": "",
+    "weeks": "",
+    "place": "体育馆",
+    "categories": ["体育项目"]
+  },
+  {
+    "keyword": "大数据",
+    "teacher": "",
+    "priority": 3,
+    "time": "",
+    "weeks": "",
+    "place": "",
+    "categories": []
+  }
+]
