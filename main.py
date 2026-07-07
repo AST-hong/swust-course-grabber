@@ -48,6 +48,9 @@ CONFIG = {
     "max_retries": 50,
     "retry_interval": 0.1,  # 秒
 
+    # 选课学期参数 (CT值，当前为2)
+    "ct": "2",
+
     # Cookie文件
     "cookie_file": "cookies.pkl",
 
@@ -457,10 +460,13 @@ class CourseSelector:
         "第五讲": (9, 10), "第六讲": (11, 12),
     }
 
-    # 课程分类: event名称 → (教学班API, 选课API, 显示名称)
+    # 课程分类: (event名称, 教学班API, 选课API, 显示名称)
     CATEGORIES = [
-        ("programTask", "apiPlanTaskTable", "apiChoosePlanTask", "计划课程"),
-        ("sportTask",   "apiSportTaskTable", "apiChooseSportTask", "体育项目"),
+        ("programTask", "apiPlanTaskTable",     "apiChoosePlanTask",     "计划课程"),
+        ("commonTask",  "apiCommonTaskTable",   "apiChooseCommonTask",   "全校通选课"),
+        ("sportTask",   "apiSportTaskTable",     "apiChooseSportTask",    "体育项目"),
+        ("retakeTask",  "apiRetakePlanTaskTable","apiRetakePlanTask",     "重新学习"),
+        ("fixupTask",   "apiFixupPlanTaskTable", "apiFixupPlanTask",      "补选低年级课程"),
     ]
 
     def __init__(self, config, session):
@@ -472,8 +478,8 @@ class CourseSelector:
         self._course_cache = None  # 缓存的课程列表
 
     @classmethod
-    def _get_category_url(cls, event_name):
-        return f"{cls.base_url if hasattr(cls,'base_url') else 'https://matrix.dean.swust.edu.cn/acadmicManager/index.cfm'}?event=chooseCourse:{event_name}&CT=1"
+    def _get_category_url(cls, event_name, ct="2"):
+        return f"{cls.base_url if hasattr(cls,'base_url') else 'https://matrix.dean.swust.edu.cn/acadmicManager/index.cfm'}?event=chooseCourse:{event_name}&CT={ct}"
 
     def load_schedule(self):
         """加载当前课表"""
@@ -491,7 +497,8 @@ class CourseSelector:
         """探索所有课程分类下的可选课程列表"""
         all_courses = []
         for event_name, api_name, choose_api, label in self.CATEGORIES:
-            url = f"{self.base_url}?event=chooseCourse:{event_name}&CT=1"
+            ct = self.config.get("ct", "2")
+            url = f"{self.base_url}?event=chooseCourse:{event_name}&CT={ct}"
             print(f"\n[*] 正在获取{label}页面...")
             resp = self.session.get(url)
             resp.encoding = "utf-8"
@@ -517,6 +524,7 @@ class CourseSelector:
 
     def _parse_course_list(self, soup, event_name="", api_name="", choose_api="", category_label=""):
         """从课程页面解析 div.courseShow 课程列表"""
+        ct = self.config.get("ct", "2")
         courses = []
         for div in soup.find_all("div", class_="courseShow"):
             cid = div.get("cid", "")
@@ -550,6 +558,7 @@ class CourseSelector:
                 "api_name": api_name,
                 "choose_api": choose_api,
                 "category": category_label,
+                "ct": ct,
             })
 
         if courses:
@@ -560,14 +569,15 @@ class CourseSelector:
                 print(f"    {c['name']} ({c['credit']}学分 {c['type']}){sel}")
         return courses
 
-    def _fetch_course_sections(self, cid, api_name="apiPlanTaskTable", choose_api="apiChoosePlanTask", category_url=None):
+    def _fetch_course_sections(self, cid, api_name="apiPlanTaskTable", choose_api="apiChoosePlanTask",
+                               category_url=None, event_name="", ct="2"):
         """通过 AJAX API 获取某门课程的教学班列表
         api_name: 如 apiPlanTaskTable / apiSportTaskTable
         choose_api: 如 apiChoosePlanTask / apiChooseSportTask
+        event_name: 如 programTask / sportTask，用于构建 Referer
         """
         if category_url is None:
-            # fallback: 用programTask的URL
-            category_url = f"{self.base_url}?event=chooseCourse:programTask&CT=1"
+            category_url = f"{self.base_url}?event=chooseCourse:{event_name or 'programTask'}&CT={ct}"
         resp = self.session.post(
             f"{self.base_url}?event=chooseCourse:{api_name}",
             data={"TID": "261", "CID": cid, "seed": str(int(time.time() * 1000))},
@@ -619,6 +629,8 @@ class CourseSelector:
                 "time": time_str,
                 "place": place,
                 "choose_api": choose_api,
+                "event_name": event_name,
+                "ct": ct,
             }
             # 解析上课时间
             parsed_time = self._parse_section_time(time_str)
@@ -766,11 +778,14 @@ class CourseSelector:
                 continue
 
             print(f"  [*] 获取教学班: {m['name']} (CID:{m['cid']}, {m.get('category','?')})...")
+            ct = m.get("ct", self.config.get("ct", "2"))
             sections = self._fetch_course_sections(
                 m["cid"],
                 api_name=m.get("api_name", "apiPlanTaskTable"),
                 choose_api=m.get("choose_api", "apiChoosePlanTask"),
-                category_url=f"{self.base_url}?event=chooseCourse:{m.get('event_name','programTask')}&CT=1"
+                event_name=m.get("event_name", "programTask"),
+                ct=ct,
+                category_url=f"{self.base_url}?event=chooseCourse:{m.get('event_name','programTask')}&CT={ct}"
             )
             for s in sections:
                 s["name"] = m["name"]
@@ -817,12 +832,14 @@ class CourseSelector:
         """提交选课请求"""
         course_name = section_info.get("name", "?")
         course_idx = section_info.get("course_idx", "?")
-        print(f"[*] 选课: {course_name} (课序号:{course_idx})")
+        event_name = section_info.get("event_name", "programTask")
+        ct = section_info.get("ct", self.config.get("ct", "2"))
+        print(f"[*] 选课: {course_name} (课序号:{course_idx}, 分类:{event_name})")
 
         resp = self.session.post(
             f"{self.base_url}?event=chooseCourse:{section_info.get('choose_api', 'apiChoosePlanTask')}",
             data={
-                "CT": "1",
+                "CT": ct,
                 "TID": section_info.get("term_id", "261"),
                 "CID": section_info.get("course_id", ""),
                 "CIDX": section_info.get("course_idx", ""),
@@ -833,7 +850,7 @@ class CourseSelector:
                 "seed": str(int(time.time() * 1000)),
             },
             headers={
-                "Referer": f"{self.base_url}?event=chooseCourse:programTask&CT=1",
+                "Referer": f"{self.base_url}?event=chooseCourse:{event_name}&CT={ct}",
                 "X-Requested-With": "XMLHttpRequest",
             },
         )
